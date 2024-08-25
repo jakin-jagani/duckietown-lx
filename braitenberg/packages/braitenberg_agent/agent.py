@@ -25,8 +25,8 @@ from solution.preprocessing import preprocess
 # TODO edit this Config class ! Play with different gain and const values
 @dataclass
 class BraitenbergAgentConfig:
-    gain: float = 0.9
-    const: float = 0.0
+    gain: float = 0.25
+    const: float = 0.4
 
 
 class BraitenbergAgent:
@@ -80,6 +80,9 @@ class BraitenbergAgent:
         l = float(np.sum(P * self.left))
         r = float(np.sum(P * self.right))
 
+        # print(f"Left activation value = {l}")
+        # print(f"Right activation value = {r}")
+
         # These are big numbers -- we want to normalize them.
         # We normalize them using the history
 
@@ -92,6 +95,9 @@ class BraitenbergAgent:
         # now rescale from 0 to 1
         ls = rescale(l, self.l_min, self.l_max)
         rs = rescale(r, self.r_min, self.r_max)
+
+        # print(f"Left activation rescale value = {ls}")
+        # print(f"Right activation rescale value = {rs}")
 
         gain = self.config.gain
         const = self.config.const
