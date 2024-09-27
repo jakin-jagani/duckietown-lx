@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 
+# Obtain the lower and upper hsv from braitenberg02 exercise
 lower_hsv = np.array([0, 0, 70])
 upper_hsv = np.array([60, 255, 255])
 
