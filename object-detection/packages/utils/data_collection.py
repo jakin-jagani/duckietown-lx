@@ -17,7 +17,7 @@ from solution.setup_activity import find_all_boxes_and_classes
 # NOTE: These are parameters you can play with
 
 # - the percentage of simulated data that will go into the training set (as opposed to the testing set)
-SIMULATED_TRAIN_SPLIT_PERCENTAGE = 0.8
+SIMULATED_TRAIN_SPLIT_PERCENTAGE = 0.7
 
 # - maps to use while generating new images (you don't have to change this)
 MAPS = ["loop_pedestrians", "udem1", "loop_dyn_duckiebots", "zigzag_dists"]
@@ -27,7 +27,7 @@ MAX_NUMBER_OF_IMAGES = 200
 MAX_NUMBER_OF_IMAGES_PER_MAP = 50
 
 # - every X images taken from a map we reset the environment
-RESET_ENVIRONMENT_EVERY_IMAGES = 100
+RESET_ENVIRONMENT_EVERY_IMAGES = 5
 
 # - save images with bounding boxes (this will NOT work for training, but is useful for debugging)
 EXPORT_BOUNDING_BOX_IMAGES = False
