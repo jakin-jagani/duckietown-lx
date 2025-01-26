@@ -324,7 +324,7 @@ class Planner:
             return math.dist(node, (obstacle.pose.x, obstacle.pose.y)) > (obstacle.primitive.radius + SAFE_DISTANCE)
         
         elif isinstance(obstacle.primitive, Rectangle):
-            rect_corners = self.get_rectangle_global_coordinates(obstacle)
-            return not self.is_point_in_bounding_box(node, rect_corners)
+            rect_corners = get_rectangle_global_coordinates(obstacle)
+            return not is_point_in_bounding_box(node, rect_corners)
 
         return True  # Safe if obstacle type is unknown
