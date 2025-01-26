@@ -26,7 +26,6 @@ class CollisionChecker:
         self.params = data
 
     def on_received_query(self, context: Context, data: CollisionCheckQuery):
-        print(f"Robot Body = {self.params.body}")
         collided = check_collision(
             environment=self.params.environment, robot_body=self.params.body, robot_pose=data.pose
         )
@@ -49,7 +48,6 @@ def check_collision(
 
     # Roto-translate the robot_body by robot_pose to get robot_body in global frame
     roto_translated_robot: List[PlacedPrimitive] = get_robot_body_in_global_frame(robot_body, robot_pose)
-
     # Check if any part of the robot body collides with the environment
     for robot, envObject in itertools.product(roto_translated_robot, environment):
         if check_collision_shape(robot, envObject):
@@ -62,50 +60,58 @@ def check_collision_shape(a: PlacedPrimitive, b: PlacedPrimitive) -> bool:
     Function to check if the 2 PlacedPrimitive shapes are colliding
     :return bool: True if colliding else False
     """
-
+    # Check collision between two Circles
     if isinstance(a.primitive, Circle) and isinstance(b.primitive, Circle):
         a_center = (a.pose.x, a.pose.y)
         b_center = (b.pose.x, b.pose.y)
         a_radius = a.primitive.radius
         b_radius = b.primitive.radius
         return math.dist(a_center, b_center) <= (a_radius + b_radius) 
-        
+    # Check collision between a Rectangle [Robot Body] and a Circle
+    # Other way round is not considered since robot body only contains a single rectangle in this exercise
     elif isinstance(a.primitive, Rectangle) and isinstance(b.primitive, Circle):
         a_rect_corners = get_rectangle_global_coordinates(a)
-        # Divide circle circumference into multiple points to see if any of its
-        # circumference points lie inside rectangle
-        theta_step_deg = 20
-        collision = False
-        for theta in range(0, 360, theta_step_deg):
-            theta_rad = math.radians(theta)
-            circle_x = b.pose.x + b.primitive.radius * math.cos(theta_rad)
-            circle_y = b.pose.y + b.primitive.radius * math.sin(theta_rad)
-            if is_point_in_bounding_box((circle_x, circle_y), a_rect_corners):
-                collision = True
-                break
-        return collision
-    elif isinstance(a.primitive, Circle) and isinstance(b.primitive, Rectangle):
-        b_rect_corners = get_rectangle_global_coordinates(b)
-        # Divide circle circumference into multiple points to see if any of its
-        # circumference points lie inside rectangle
-        theta_step_deg = 20
-        collision = False
-        for theta in range(0, 360, theta_step_deg):
-            theta_rad = math.radians(theta)
-            circle_x = a.pose.x + a.primitive.radius * math.cos(theta_rad)
-            circle_y = a.pose.y + a.primitive.radius * math.sin(theta_rad)
-            if is_point_in_bounding_box((circle_x, circle_y), b_rect_corners):
-                collision = True
-                break
-        return collision
+        # Determine distance between Rectangle and Circle
+        rect_center = (a.pose.x, a.pose.y)
+        circle_center = (b.pose.x, b.pose.y)
+        circle_radius = b.primitive.radius
+        dist_btw_centers = math.dist(rect_center, circle_center)
+
+        # Determine the max and minn radius of circle inscribing and out-scribing the rectangle
+        max_rect_circle_radius = math.sqrt(a.primitive.xmax * a.primitive.xmax + a.primitive.ymax * a.primitive.ymax)
+        min_rect_circle_radius = a.primitive.ymax
+
+        # Check if the distance between the centers is greater than max_rect_circle_radius
+        if dist_btw_centers > (max_rect_circle_radius + circle_radius):
+            return False
+        # Check if the distance between the centers is less than min_rect_circle_radius
+        # where min_rect_circle_radius = ymax
+        elif dist_btw_centers < (min_rect_circle_radius + circle_radius):
+            return True
+        else:
+            # Check if each corner of the rectangle is not within the circle
+            for corner in a_rect_corners:
+                dist_btw_rect_corner_and_circle_center = math.dist(corner, circle_center)
+                if dist_btw_rect_corner_and_circle_center < circle_radius:
+                    return True
+        # Finally return False if no collision is detected above
+        return False
+    # Check collision between two rectangles
     elif isinstance(a.primitive, Rectangle) and isinstance(b.primitive, Rectangle):
         a_rect_corners = get_rectangle_global_coordinates(a)
         b_rect_corners = get_rectangle_global_coordinates(b)
         collision = False
+        # Check if any A-Rectangle corners lie within B-Rectangle
         for a_rect_corner in a_rect_corners:
             if is_point_in_bounding_box(a_rect_corner, b_rect_corners):
                 collision = True
                 break
+        if not collision:
+            # Check if any B-Rectangle corners lie within A Rectangle
+            for b_rect_corner in b_rect_corners:
+                if is_point_in_bounding_box(b_rect_corner, a_rect_corners):
+                    collision = True
+                    break
         return collision
 
 def get_robot_body_in_global_frame(robot_body: List[PlacedPrimitive], robot_pose: FriendlyPose) -> List[PlacedPrimitive]:
@@ -146,7 +152,7 @@ def get_rectangle_global_coordinates(rect: PlacedPrimitive) -> Tuple:
         rect: [PlacedPrimitve] Rectangle shape
 
     Returns:
-        Tuple of (x,y) coorinates of each of the rectangle corners
+        Tuple of (x,y) coordinates of each of the rectangle corners
     """
 
     # Get the distance from center (pose) to the sides of the rectangle
@@ -171,10 +177,10 @@ def get_rectangle_global_coordinates(rect: PlacedPrimitive) -> Tuple:
 
     return (x1, y1), (x2, y2), (x3, y3), (x4, y4)
 
-def is_point_in_bounding_box(p: Tuple, box: Tuple) -> bool:
+def is_point_in_bounding_box(p: Tuple[float, float], box: Tuple[Tuple[float, float], ...]) -> bool:
     """
-    Function to check if a point is within a bounding box with 4 corners
-    :return bool: True if point lies within the quadrilateral else False
+    Function to check if a point is within or on the bounding box with 4 corners.
+    :return bool: True if point lies within or on the quadrilateral, else False.
     """
     x, y = p
     (x1, y1), (x2, y2), (x3, y3), (x4, y4) = box
@@ -185,12 +191,13 @@ def is_point_in_bounding_box(p: Tuple, box: Tuple) -> bool:
     cp3 = cross_product(x3, y3, x4, y4, x, y)
     cp4 = cross_product(x4, y4, x1, y1, x, y)
 
-    # Check if all cross products have the same sign
+    # Check if the point is inside the bounding box
     if (cp1 > 0 and cp2 > 0 and cp3 > 0 and cp4 > 0) or (cp1 < 0 and cp2 < 0 and cp3 < 0 and cp4 < 0):
         return True  # Point is inside the bounding box
-    else:
-        return False  # Point is outside the bounding box
 
+    return False  # Point is outside the bounding box
 
-def cross_product(x1, y1, x2, y2, x, y):
+def cross_product(x1, y1, x2, y2, x, y) -> float:
     return (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1)
+
+
