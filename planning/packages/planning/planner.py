@@ -19,9 +19,9 @@ from dt_protocols import (
 __all__ = ["Planner"]
 
 # Constants
-GRID_SIZE = 0.5  # distance between 2 nodes in x and y direction in the 3d graph
+GRID_SIZE = 0.25  # distance between 2 nodes in x and y direction in the 3d graph
 THETA_STEP_DEG = 15  # [deg] minimum theta step for each node in the 3d graph
-SAFE_DISTANCE = 0.5 # Safety tolerance around the robot pose to detect collision
+SAFE_DISTANCE = 0.0 # Safety tolerance around the robot pose to detect collision
 
 def get_relative_angle_between_nodes(node1: FriendlyPose, node2: FriendlyPose):
 
@@ -194,15 +194,12 @@ class Planner:
         # You need to declare if it is feasible or not
         feasible = True
 
-        if not feasible:
-            # If it's not feasible, just return this.
-            result: PlanningResult = PlanningResult(False, None)
-            context.write("response", result)
-            return
+        # Initialize the plan
+        plan = []
 
         # Determine if the environment contains obstacles
-        print(f"Environment = {self.params.environment}")
-        print(f"Number of obstacles by bounding box = {len(self.params.environment)}")
+        # print(f"Environment = {self.params.environment}")
+        print(f"Number of obstacles including the bounding box = {len(self.params.environment)}")
         # If no obstacles are present then connect the start and end pose directly
         if len(self.params.environment) <= 4:
             # Get plan steps between the start and the end pose when there are no obstacles in the environment
@@ -211,15 +208,39 @@ class Planner:
             # Get plan steps when there are obstacles in the environment
             start_node = (start_pose.x, start_pose.y, start_pose.theta_deg)
             end_node = (end_pose.x, end_pose.y, end_pose.theta_deg)
-            graph_w_edges = self.generate_3d_graph(start_node, end_node)
-            shortest_path = self.get_shortest_path_for_graph(graph_w_edges, start_node, end_node)
-            plan = []
-            for i in range(len(shortest_path) - 1):
-                u, v = shortest_path[i], shortest_path[i + 1]
-                plan.append(graph_w_edges[u][v]['plan'])
+            graph_w_edges, nodes_list = self.generate_3d_graph()
 
-        result: PlanningResult = PlanningResult(feasible, plan)
-        context.write("response", result)
+            # Check and get nearest nodes on grid to start and end node
+            on_grid_start_node = check_and_get_node(start_node, nodes_list)
+            on_grid_end_node = check_and_get_node(end_node, nodes_list)
+
+            shortest_path = self.get_shortest_path_for_graph(graph_w_edges, on_grid_start_node, on_grid_end_node)
+            if shortest_path is None:
+                print("There is no feasible shortest path. Skipping this query!")
+                feasible = False
+            else:
+                if len(shortest_path) != 0:
+                    for i in range(len(shortest_path) - 1):
+                        u, v = shortest_path[i], shortest_path[i + 1]
+                        try:
+                            edge_data_dict = graph_w_edges.get_edge_data(u, v)
+                            for id_edge, edge_data in edge_data_dict.items():
+                                for edge_specific_plan in edge_data['plan']:
+                                    plan.append(edge_specific_plan)
+                        except KeyError:
+                            print(f"Edge between {u} and {v} does not have a 'plan' attribute or does not exist")
+
+                print(f"Plan of each step to get from start to end node = {plan}")
+
+        # Provide the final result based on the feasibility
+        if not feasible:
+            # If it's not feasible, just return this.
+            result: PlanningResult = PlanningResult(False, None)
+            context.write("response", result)
+            return
+        else:
+            result: PlanningResult = PlanningResult(feasible, plan)
+            context.write("response", result)
 
     def get_straight_line_motion_plan_step(self, distance_m) -> (PlanStep, float):
         """
@@ -301,7 +322,7 @@ class Planner:
 
         return plan_steps, total_plan_duration_sec
 
-    def generate_3d_graph(self, given_start_node: Tuple, given_end_node: Tuple):
+    def generate_3d_graph(self):
 
         # Get x and y value array for the given bounds and grid size
         x_values = np.arange(self.xmin, self.xmax+GRID_SIZE, GRID_SIZE)
@@ -319,7 +340,6 @@ class Planner:
                 obstacles_wo_bounding_box =self.params.environment[4:]
                 for obstacle in obstacles_wo_bounding_box:
                     if not self.check_if_node_is_safe(node_xy, obstacle):
-                        print(f"Point {node_xy} is within {obstacle}")
                         is_node_safe = False
                         break
                 if not is_node_safe:
@@ -329,10 +349,6 @@ class Planner:
                     node = (x, y, theta)
                     nodes_list.append(node)
 
-        # Check and get start and end node
-        start_node = check_and_get_node(given_start_node, nodes_list)
-        end_node = check_and_get_node(given_end_node, nodes_list)
-
         # Create a Multi Directional Graph
         graph = nx.MultiDiGraph()
         graph.add_nodes_from(nodes_list)
@@ -340,7 +356,7 @@ class Planner:
         # Add edges to the graph
         graph_w_edges = self.add_edges_to_graph(graph)
 
-        return graph_w_edges
+        return graph_w_edges, nodes_list
 
     def check_if_node_is_safe(self, node: Tuple[float, float], obstacle: PlacedPrimitive) -> bool:
         """
@@ -361,9 +377,8 @@ class Planner:
     def add_edges_to_graph(self, graph):
 
         # Add edges between each node and its neighbor
-        nodes_list = list(graph.nodes)
         nodes_x_y_list = list({(x, y) for x, y, _ in graph.nodes})
-
+        # print(f"nodes_x_y_list = {nodes_x_y_list}")
         for node_xy in nodes_x_y_list:
             # Extract x,y from node
             x, y = node_xy
