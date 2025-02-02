@@ -21,7 +21,7 @@ __all__ = ["Planner"]
 # Constants
 GRID_SIZE = 0.25  # distance between 2 nodes in x and y direction in the 3d graph
 THETA_STEP_DEG = 15  # [deg] minimum theta step for each node in the 3d graph
-SAFE_DISTANCE = 0.0 # Safety tolerance around the robot pose to detect collision
+SAFE_DISTANCE = 0.1 # Safety tolerance around the robot pose to detect collision
 
 def get_relative_angle_between_nodes(node1: FriendlyPose, node2: FriendlyPose):
 
@@ -32,7 +32,6 @@ def get_relative_angle_between_nodes(node1: FriendlyPose, node2: FriendlyPose):
     relative_angle_deg = math.degrees(relative_angle_rad)
 
     return relative_angle_deg
-
 
 def get_angle_to_rotate(start_angle, end_angle):
     """
@@ -51,12 +50,22 @@ def get_angle_to_rotate(start_angle, end_angle):
 
     return diff_between_angles
 
+def is_point_on_segment(x1, y1, x2, y2, x, y, point_cross_product) -> bool:
+    """
+    Check if the point (x, y) lies exactly on the line segment between (x1, y1) and (x2, y2).
+    """
+    # Check if the cross product is zero (collinear check)
+    if point_cross_product == 0:
+        # Ensure the point lies within the segment bounds
+        return min(x1, x2) <= x <= max(x1, x2) and min(y1, y2) <= y <= max(y1, y2)
+    return False
+
 def is_point_in_bounding_box(p, box):
     """
     Function to check if the given point is in the bounding box
     :param p: [Tuple] Point with x,y coordinates
     :param box: [List] A list of tuple coordinates as the 4 corners of the box
-    :retrun: [bool] True if the point is in the bounding box else False
+    :return: [bool] True if the point is in the bounding box else False
     """
     x, y = p
     (x1, y1), (x2, y2), (x3, y3), (x4, y4) = box
@@ -70,9 +79,14 @@ def is_point_in_bounding_box(p, box):
     # Check if all cross products have the same sign
     if (cp1 > 0 and cp2 > 0 and cp3 > 0 and cp4 > 0) or (cp1 < 0 and cp2 < 0 and cp3 < 0 and cp4 < 0):
         return True  # Point is inside the bounding box
-    else:
-        return False  # Point is outside the bounding box
+    # Check if the point is on any of the edges
+    if is_point_on_segment(x1, y1, x2, y2, x, y, cp1) or \
+            is_point_on_segment(x2, y2, x3, y3, x, y, cp2) or \
+            is_point_on_segment(x3, y3, x4, y4, x, y, cp3) or \
+            is_point_on_segment(x4, y4, x1, y1, x, y, cp4):
+        return True  # Point is on the edge of the bounding box
 
+    return False  # Point is outside the bounding box
 
 def cross_product(x1, y1, x2, y2, x, y):
     return (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1)
@@ -88,24 +102,29 @@ def get_rectangle_global_coordinates(rect: PlacedPrimitive):
     x_c = rect.pose.x
     y_c = rect.pose.y
 
-    x = rect.primitive.xmax + SAFE_DISTANCE
-    y = rect.primitive.ymax + SAFE_DISTANCE
+    # Rectangle xmax and ymax
+    x_m = rect.primitive.xmax + SAFE_DISTANCE
+    y_m = rect.primitive.ymax + SAFE_DISTANCE
+
+    # Rectangle xmin and ymin
+    x_n = rect.primitive.xmin - SAFE_DISTANCE
+    y_n = rect.primitive.ymin - SAFE_DISTANCE
 
     # top right coordinates
-    x1 = x_c + x * math.cos(theta) - y * math.sin(theta)
-    y1 = y_c + x * math.sin(theta) + y * math.cos(theta)
+    x1 = x_c + x_m * math.cos(theta) - y_m * math.sin(theta)
+    y1 = y_c + x_m * math.sin(theta) + y_m * math.cos(theta)
 
     # bottom right coordinates
-    x2 = x_c + x * math.cos(theta) + y * math.sin(theta)
-    y2 = y_c + x * math.sin(theta) - y * math.cos(theta)
+    x2 = x_c + x_m * math.cos(theta) - y_n * math.sin(theta)
+    y2 = y_c + x_m * math.sin(theta) + y_n * math.cos(theta)
 
     # bottom left coordinates
-    x3 = x_c - x * math.cos(theta) + y * math.sin(theta)
-    y3 = y_c - x * math.sin(theta) - y * math.cos(theta)
+    x3 = x_c + x_n * math.cos(theta) - y_n * math.sin(theta)
+    y3 = y_c + x_n * math.sin(theta) + y_n * math.cos(theta)
 
     # top left coordinates
-    x4 = x_c - x * math.cos(theta) - y * math.sin(theta)
-    y4 = y_c - x * math.sin(theta) + y * math.cos(theta)
+    x4 = x_c + x_n * math.cos(theta) - y_m * math.sin(theta)
+    y4 = y_c + x_n * math.sin(theta) + y_m * math.cos(theta)
 
     return [(x1, y1), (x2, y2), (x3, y3), (x4, y4)]
 
@@ -181,8 +200,6 @@ class Planner:
         self.ymin = bounds.ymin
         self.ymax = bounds.ymax
 
-        print(f"Bounds = {self.xmax, self.xmin, self.ymax, self.ymin}")
-
     def on_received_query(self, context: Context, data: PlanningQuery):
         # A planning query is a pair of initial and goal poses
         start_pose: FriendlyPose = data.start
@@ -198,7 +215,6 @@ class Planner:
         plan = []
 
         # Determine if the environment contains obstacles
-        # print(f"Environment = {self.params.environment}")
         print(f"Number of obstacles including the bounding box = {len(self.params.environment)}")
         # If no obstacles are present then connect the start and end pose directly
         if len(self.params.environment) <= 4:
@@ -219,8 +235,15 @@ class Planner:
                 print("There is no feasible shortest path. Skipping this query!")
                 feasible = False
             else:
+                # Get plan between start_pose and the second point in the shortest path to skip the nearest node to the start node
+                start_plan_steps, _ = self.get_plan_wo_obstacles(start_pose, FriendlyPose(shortest_path[1][0], shortest_path[1][1], shortest_path[1][2]))
+                for start_plan_step in start_plan_steps:
+                    plan.append(start_plan_step)
+
                 if len(shortest_path) != 0:
-                    for i in range(len(shortest_path) - 1):
+                    # Get the plan between nodes of the shortest path, skipping the first and the last nodes which are
+                    # close to the actual start and target nodes
+                    for i in range(1, len(shortest_path) - 2):
                         u, v = shortest_path[i], shortest_path[i + 1]
                         try:
                             edge_data_dict = graph_w_edges.get_edge_data(u, v)
@@ -230,7 +253,11 @@ class Planner:
                         except KeyError:
                             print(f"Edge between {u} and {v} does not have a 'plan' attribute or does not exist")
 
-                print(f"Plan of each step to get from start to end node = {plan}")
+                # Get plan between 2nd last point in the shortest path and given_end_node
+                end_plan_steps, _ = self.get_plan_wo_obstacles(FriendlyPose(shortest_path[-2][0], shortest_path[-2][1], shortest_path[-2][2]), end_pose)
+                for end_plan_step in end_plan_steps:
+                    plan.append(end_plan_step)
+                # print(f"Plan of each step to get from start to end node = {plan}")
 
         # Provide the final result based on the feasibility
         if not feasible:
@@ -336,9 +363,8 @@ class Planner:
                 # Check if the x and y of the node is within any of the obstacles
                 is_node_safe = True
                 node_xy = (x,y)
-                # Get obstacles without the bounding box
-                obstacles_wo_bounding_box =self.params.environment[4:]
-                for obstacle in obstacles_wo_bounding_box:
+                # Check if the node_xy is safe within obstacles
+                for obstacle in self.params.environment:
                     if not self.check_if_node_is_safe(node_xy, obstacle):
                         is_node_safe = False
                         break
@@ -421,7 +447,7 @@ class Planner:
 
         try:
             shortest_path = nx.shortest_path(graph, source=start_node, target=end_node, weight='weight')
-            print(shortest_path)
+            print(f"Shortest Path = {shortest_path}")
             return shortest_path
         except nx.NetworkXNoPath as e:
             print(e)
